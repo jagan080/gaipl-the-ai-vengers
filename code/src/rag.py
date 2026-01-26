@@ -6,8 +6,8 @@ import pandas as pd
 import fitz  # PyMuPDF
 import json
 import os
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
 
 import os
 from agent_setup import run_agent 
@@ -15,7 +15,7 @@ from agent_setup import run_agent
 client = InferenceClient(
     provider="hf-inference",
     api_key=os.getenv("HUGGINGFACE_API_KEY"),
-    model="mistralai/Mistral-7B-Instruct-v0.1",
+    model="HuggingFaceTB/SmolLM3-3B",
 )
 
 # Initialize ChromaDB
@@ -100,7 +100,6 @@ Provide solutions derived strictly from the knowledge base and previous cases—
         {"role": "user", "content": f"Context: {context}\n\nUser Query: {prompt}"}
     ]
     response = client.chat_completion(
-        model="mistralai/Mistral-7B-Instruct-v0.1",
         messages=messages,
         max_tokens=500,
         temperature=0.7,

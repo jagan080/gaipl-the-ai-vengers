@@ -12,3 +12,4 @@ langgraph
 pypdf
 PyMuPDF
 python-docx
+langchain-huggingface

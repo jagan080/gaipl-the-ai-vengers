@@ -2,7 +2,7 @@ import re
 
 from typing import List
 from pydantic import BaseModel
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph
 from langchain_core.messages import AIMessage, HumanMessage
