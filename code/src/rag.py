@@ -15,7 +15,7 @@ from agent_setup import run_agent
 client = InferenceClient(
     provider="hf-inference",
     api_key=os.getenv("HUGGINGFACE_API_KEY"),
-    model="HuggingFaceTB/SmolLM3-3B",
+    model="katanemo/Arch-Router-1.5B",
 )
 
 # Initialize ChromaDB
