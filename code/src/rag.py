@@ -6,16 +6,78 @@ import pandas as pd
 import fitz  # PyMuPDF
 import json
 import os
+import requests
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from docx import Document
 from agent_setup import run_agent 
 
-client = InferenceClient(
-    provider="hf-inference",
-    api_key=os.getenv("HUGGINGFACE_API_KEY"),
-    model="katanemo/Arch-Router-1.5B",
-)
+# ============================================
+# LLM Client Configuration
+# ============================================
+
+# OPTION 1: Hugging Face Inference API (Commented Out)
+# =============================================
+# client = InferenceClient(
+#     provider="hf-inference",
+#     api_key=os.getenv("HUGGINGFACE_API_KEY"),
+#     model="katanemo/Arch-Router-1.5B",
+# )
+
+# OPTION 2: Ollama (Local LLM) - ACTIVE
+# ======================================
+OLLAMA_API_URL = "http://localhost:11434/api/chat"
+OLLAMA_MODEL = "mistral"  # or "neural-chat", "llama2", etc.
+
+def call_ollama(messages, temperature=0.7, max_tokens=500):
+    """Call local Ollama LLM"""
+    try:
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": False,
+        }
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+        return result.get("message", {}).get("content", "Error: No response from Ollama")
+    except requests.exceptions.ConnectionError:
+        return "Error: Cannot connect to Ollama. Make sure Ollama is running on localhost:11434"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# OPTION 3: Google Vertex AI Gemini (Commented Out)
+# ==================================================
+# Uncomment and install: pip install google-cloud-aiplatform
+# 
+# from google.cloud import aiplatform
+# 
+# def call_gemini_vertex(messages, temperature=0.7, max_tokens=500):
+#     """Call Google Vertex AI Gemini model"""
+#     try:
+#         aiplatform.init(project=os.getenv("GCP_PROJECT_ID"), location="us-central1")
+#         
+#         # Convert messages format for Vertex AI
+#         system_message = next((msg["content"] for msg in messages if msg["role"] == "system"), "")
+#         user_message = next((msg["content"] for msg in messages if msg["role"] == "user"), "")
+#         
+#         model = aiplatform.GenerativeModel("gemini-1.5-pro")
+#         
+#         full_message = f"{system_message}\n\n{user_message}" if system_message else user_message
+#         
+#         response = model.generate_content(
+#             full_message,
+#             generation_config={
+#                 "max_output_tokens": max_tokens,
+#                 "temperature": temperature,
+#             }
+#         )
+#         
+#         return response.text
+#     except Exception as e:
+#         return f"Error: {str(e)}"
+
 
 # Initialize ChromaDB
 chroma_client = chromadb.PersistentClient(path="gaipl-the-ai-vengers/code/src/chroma_db")
@@ -131,19 +193,35 @@ def retrieve_context(query, top_k=3):
     retrieved_texts = [doc["text"] for doc in results["metadatas"][0]]
     return " ".join(retrieved_texts)
 
-# Function to generate response using Hugging Face LLM
+# Function to generate response using LLM
 def generate_response(prompt, context):
     messages = [
-        {"role": "system", "content": """You are a highly skilled Platform Engineer AI, responsible for assisting platform support teams. Your primary role is to diagnose and resolve platform-related issues strictly using the provided knowledge base articles and past incident reports. You must:
-Analyze the issue based on user input and match it with relevant past incidents and documentation.
-Provide solutions derived strictly from the knowledge base and previous cases—do not generate responses outside this scope."""},
+        {"role": "system", "content": """You are a highly skilled Platform Engineer AI, responsible for assisting platform support teams. Your primary role is to diagnose and resolve platform-related issues.
+
+When relevant context from the knowledge base is provided, prioritize using that information. However, if no context is available or insufficient, you may also draw upon your own knowledge of platform engineering best practices, common troubleshooting steps, and industry standards to provide helpful solutions.
+
+Always provide practical, actionable guidance for platform engineering challenges including:
+- Server restarts and service management
+- Checking service health and status
+- Debugging deployment issues
+- Fetching and analyzing system logs
+- General platform engineering best practices"""},
         {"role": "user", "content": f"Context: {context}\n\nUser Query: {prompt}"}
     ]
-    response = client.chat_completion(
-        messages=messages,
-        max_tokens=500,
-        temperature=0.7,
-    )
     
-    return response.choices[0].message["content"] if response.choices else "Error: No valid response from Hugging Face"
+    # OPTION 1: Use Ollama (Local LLM) - ACTIVE
+    response = call_ollama(messages, temperature=0.7, max_tokens=500)
+    return response
+    
+    # OPTION 2: Use HuggingFace Inference API (Uncomment to use)
+    # response = client.chat_completion(
+    #     messages=messages,
+    #     max_tokens=500,
+    #     temperature=0.7,
+    # )
+    # return response.choices[0].message["content"] if response.choices else "Error: No valid response from Hugging Face"
+    
+    # OPTION 3: Use Google Vertex AI Gemini (Uncomment to use)
+    # response = call_gemini_vertex(messages, temperature=0.7, max_tokens=500)
+    # return response
  
