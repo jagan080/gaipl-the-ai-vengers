@@ -13,3 +13,8 @@ pypdf
 PyMuPDF
 python-docx
 langchain-huggingface
+requests
+
+# Optional: For Gemini Vertex AI support
+# Uncomment below and run: pip install -r requirements.txt
+# google-cloud-aiplatform
