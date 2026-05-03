@@ -15,7 +15,7 @@ from agent_setup import run_agent
 # ============================================
 # CONFIGURATION: Choose LLM Provider (1, 2, or 3)
 # ============================================
-LLM_PROVIDER = 1  # Change this to switch: 1=HuggingFace, 2=Ollama, 3=Gemini Vertex AI
+LLM_PROVIDER = 2  # Change this to switch: 1=HuggingFace, 2=Ollama, 3=Gemini Vertex AI
 
 # ============================================
 # LLM Backend Abstraction
@@ -47,27 +47,44 @@ class HuggingFaceBackend(LLMBackend):
             return f"Error: {str(e)}"
 
 class OllamaBackend(LLMBackend):
-    """Ollama Local LLM Backend"""
+    """Ollama Local LLM Backend using /api/generate endpoint"""
     def __init__(self):
-        self.api_url = "http://localhost:11434/api/chat"
-        self.model = "mistral"  # or "neural-chat", "llama2", etc.
-    
+        self.api_url = "http://localhost:11434/api/generate"
+        self.model = "deepseek-r1:7b"
+      
     def call(self, messages, temperature=0.7, max_tokens=500):
         try:
+            # Convert messages to prompt format
+            prompt = self._format_messages_to_prompt(messages)
+            
             payload = {
                 "model": self.model,
-                "messages": messages,
+                "prompt": prompt,
                 "temperature": temperature,
                 "stream": False,
             }
             response = requests.post(self.api_url, json=payload, timeout=60)
             response.raise_for_status()
             result = response.json()
-            return result.get("message", {}).get("content", "Error: No response")
+            return result.get("response", "Error: No response")
         except requests.exceptions.ConnectionError:
             return "Error: Cannot connect to Ollama. Ensure Ollama is running on localhost:11434"
         except Exception as e:
             return f"Error: {str(e)}"
+    
+    def _format_messages_to_prompt(self, messages):
+        """Convert messages format to prompt string"""
+        prompt_parts = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                prompt_parts.append(f"System: {content}")
+            elif role == "user":
+                prompt_parts.append(f"User: {content}")
+            elif role == "assistant":
+                prompt_parts.append(f"Assistant: {content}")
+        return "\n".join(prompt_parts)
 
 class GeminiVertexAIBackend(LLMBackend):
     """Google Vertex AI Gemini Backend"""
@@ -218,13 +235,22 @@ def extract_text_from_file(file_path):
         return extract_text_from_json(file_path)
     elif file_path.endswith(".docx"):
         return extract_text_from_docx(file_path)
+    elif file_path.endswith(".txt"):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            return [text] if text.strip() else []
+        except Exception as e:
+            print(f"Error extracting TXT: {str(e)}")
+            return []
     else:
         return ""  # Skip unsupported files
     
-def load_initial_knowledge(folder_path):
+def load_initial_knowledge(folder_path=None):
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))  
-        folder_path = os.path.join(base_dir, "data")
+        if folder_path is None:
+            folder_path = os.path.join(base_dir, "data")
         if not os.path.exists(folder_path):
             print(f"Data folder not found: {folder_path}")
             return
@@ -235,8 +261,15 @@ def load_initial_knowledge(folder_path):
                 try:
                     text = extract_text_from_file(file_path)
                     if text:
-                        chunks = split_text(text)  
-                        add_document_to_db(chunks, file_path)
+                        # Handle both string and list returns
+                        if isinstance(text, list):
+                            for item in text:
+                                if isinstance(item, str) and item.strip():
+                                    chunks = split_text(item)
+                                    add_document_to_db(chunks, file_path)
+                        elif isinstance(text, str) and text.strip():
+                            chunks = split_text(text)
+                            add_document_to_db(chunks, file_path)
                 except Exception as e:
                     print(f"Error processing file {file_path}: {str(e)}")
                     continue
@@ -253,18 +286,31 @@ def retrieve_context(query, top_k=3):
 
 # Function to generate response using LLM
 def generate_response(prompt, context):
+    # Check if RAG context is empty or insufficient
+    has_rag_content = context and context.strip() and context.strip() != ""
+    
+    system_prompt = """You are a highly skilled AI assistant. Your primary role is to provide helpful and accurate answers to user queries.
+
+CONTEXT HANDLING:
+- If relevant context from the knowledge base is provided, prioritize using that information to answer the query.
+- If NO context is available or it is insufficient, rely on your foundation model's knowledge to provide the best possible answer.
+- Always provide practical, actionable, and accurate guidance regardless of whether RAG context is available.
+
+Guidelines:
+- Be clear and concise in your explanations
+- Provide step-by-step instructions when applicable
+- Include relevant examples or best practices
+- Acknowledge if you don't have sufficient information"""
+
+    # Format the context message
+    if has_rag_content:
+        context_message = f"Knowledge Base Context:\n{context}\n\nUser Query: {prompt}"
+    else:
+        context_message = f"Note: No relevant context found in knowledge base. Using foundation model knowledge to answer your query.\n\nUser Query: {prompt}"
+    
     messages = [
-        {"role": "system", "content": """You are a highly skilled Platform Engineer AI, responsible for assisting platform support teams. Your primary role is to diagnose and resolve platform-related issues.
-
-When relevant context from the knowledge base is provided, prioritize using that information. However, if no context is available or insufficient, you may also draw upon your own knowledge of platform engineering best practices, common troubleshooting steps, and industry standards to provide helpful solutions.
-
-Always provide practical, actionable guidance for platform engineering challenges including:
-- Server restarts and service management
-- Checking service health and status
-- Debugging deployment issues
-- Fetching and analyzing system logs
-- General platform engineering best practices"""},
-        {"role": "user", "content": f"Context: {context}\n\nUser Query: {prompt}"}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": context_message}
     ]
     
     # Use the configured LLM backend
